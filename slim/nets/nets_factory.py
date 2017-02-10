@@ -78,10 +78,11 @@ arg_scopes_map = {'alexnet_v2': alexnet.alexnet_v2_arg_scope,
                  }
 
 
-def get_network_fn(name, num_classes, weight_decay=0.0, is_training=False):
+def get_network_fn(deploy_config, name, num_classes, weight_decay=0.0, is_training=False):
   """Returns a network_fn such as `logits, end_points = network_fn(images)`.
 
   Args:
+    deploy_config: DeploymentConfig.
     name: The name of the network.
     num_classes: The number of classes to use for classification.
     weight_decay: The l2 coefficient for the model weights.
@@ -97,7 +98,9 @@ def get_network_fn(name, num_classes, weight_decay=0.0, is_training=False):
   """
   if name not in networks_map:
     raise ValueError('Name of network unknown %s' % name)
-  arg_scope = arg_scopes_map[name](weight_decay=weight_decay)
+  with slim.arg_scope([slim.model_variable, slim.variable],
+                      device=deploy_config.variables_device()):
+    arg_scope = arg_scopes_map[name](weight_decay=weight_decay)
   func = networks_map[name]
   @functools.wraps(func)
   def network_fn(images):

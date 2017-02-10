@@ -28,8 +28,21 @@ from preprocessing import preprocessing_factory
 
 slim = tf.contrib.slim
 
-tf.app.flags.DEFINE_string(
-    'master', '', 'The address of the TensorFlow master to use.')
+tf.app.flags.DEFINE_string('job_name', '', 'One of "ps", "worker"')
+
+tf.app.flags.DEFINE_string('ps_hosts', '',
+                           """Comma-separated list of hostname:port for the """
+                           """parameter server jobs. e.g. """
+                           """'machine1:2222,machine2:1111,machine2:2222'""")
+
+tf.app.flags.DEFINE_string('worker_hosts', '',
+                           """Comma-separated list of hostname:port for the """
+                           """worker jobs. e.g. """
+                           """'machine1:2222,machine2:1111,machine2:2222'""")
+
+tf.app.flags.DEFINE_bool(
+    'log_device_placement', False,
+    'Whether or not to log device placement.')
 
 tf.app.flags.DEFINE_string(
     'train_dir', '/tmp/tfmodel/',
@@ -40,13 +53,6 @@ tf.app.flags.DEFINE_integer('num_clones', 1,
 
 tf.app.flags.DEFINE_boolean('clone_on_cpu', False,
                             'Use CPUs to deploy clones.')
-
-tf.app.flags.DEFINE_integer('worker_replicas', 1, 'Number of worker replicas.')
-
-tf.app.flags.DEFINE_integer(
-    'num_ps_tasks', 0,
-    'The number of parameter servers. If the value is 0, then the parameters '
-    'are handled locally by the worker.')
 
 tf.app.flags.DEFINE_integer(
     'num_readers', 4,
@@ -69,7 +75,7 @@ tf.app.flags.DEFINE_integer(
     'The frequency with which the model is saved, in seconds.')
 
 tf.app.flags.DEFINE_integer(
-    'task', 0, 'Task id of the replica running the training.')
+    'task_id', 0, 'Task id of the replica running the training.')
 
 ######################
 # Optimization Flags #
@@ -388,21 +394,43 @@ def _get_variables_to_train():
   return variables_to_train
 
 
+def _parse_comma_list(s):
+  if s is None or s == '':
+    return []
+  return s.split(',')
+
+
 def main(_):
+  if len(_parse_comma_list(FLAGS.worker_hosts)) > 0:
+    cluster = tf.train.ClusterSpec({'ps': _parse_comma_list(FLAGS.ps_hosts),
+                                    'worker': _parse_comma_list(FLAGS.worker_hosts)})
+    server = tf.train.Server(cluster, job_name=FLAGS.job_name, task_index=FLAGS.task_id)
+    if FLAGS.job_name == 'ps':
+      # Parameter server is passive beast.
+      server.join()
+    else:
+      device = tf.train.replica_device_setter(worker_device="/job:worker/task:%d" % server.server_def.task_index,
+                                              cluster=cluster)
+      do_main(master=server.target, device=device)
+  else:
+    do_main()
+
+
+def do_main(master='', device=None):
   if not FLAGS.dataset_dir:
     raise ValueError('You must supply the dataset directory with --dataset_dir')
 
   tf.logging.set_verbosity(tf.logging.INFO)
-  with tf.Graph().as_default():
+  with tf.Graph().as_default(), tf.device(device):
     ######################
     # Config model_deploy#
     ######################
     deploy_config = model_deploy.DeploymentConfig(
         num_clones=FLAGS.num_clones,
         clone_on_cpu=FLAGS.clone_on_cpu,
-        replica_id=FLAGS.task,
-        num_replicas=FLAGS.worker_replicas,
-        num_ps_tasks=FLAGS.num_ps_tasks)
+        replica_id=FLAGS.task_id,
+        num_replicas=max(1, len(_parse_comma_list(FLAGS.worker_hosts))),
+        num_ps_tasks=len(_parse_comma_list(FLAGS.ps_hosts)))
 
     # Create global_step
     with tf.device(deploy_config.variables_device()):
@@ -418,6 +446,7 @@ def main(_):
     # Select the network #
     ####################
     network_fn = nets_factory.get_network_fn(
+        deploy_config,
         FLAGS.model_name,
         num_classes=(dataset.num_classes - FLAGS.labels_offset),
         weight_decay=FLAGS.weight_decay,
@@ -528,8 +557,8 @@ def main(_):
           replicas_to_aggregate=FLAGS.replicas_to_aggregate,
           variable_averages=variable_averages,
           variables_to_average=moving_average_variables,
-          replica_id=tf.constant(FLAGS.task, tf.int32, shape=()),
-          total_num_replicas=FLAGS.worker_replicas)
+          replica_id=tf.constant(FLAGS.task_id, tf.int32, shape=()),
+          total_num_replicas=max(1, len(_parse_comma_list(FLAGS.worker_hosts))))
     elif FLAGS.moving_average_decay:
       # Update ops executed locally by trainer.
       update_ops.append(variable_averages.apply(moving_average_variables))
@@ -570,15 +599,16 @@ def main(_):
     slim.learning.train(
         train_tensor,
         logdir=FLAGS.train_dir,
-        master=FLAGS.master,
-        is_chief=(FLAGS.task == 0),
+        master=master,
+        is_chief=(FLAGS.task_id == 0),
         init_fn=_get_init_fn(),
         summary_op=summary_op,
         number_of_steps=FLAGS.max_number_of_steps,
         log_every_n_steps=FLAGS.log_every_n_steps,
         save_summaries_secs=FLAGS.save_summaries_secs,
         save_interval_secs=FLAGS.save_interval_secs,
-        sync_optimizer=optimizer if FLAGS.sync_replicas else None)
+        sync_optimizer=optimizer if FLAGS.sync_replicas else None,
+        session_config=tf.ConfigProto(log_device_placement=FLAGS.log_device_placement))
 
 
 if __name__ == '__main__':
