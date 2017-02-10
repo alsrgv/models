@@ -556,14 +556,6 @@ class DeploymentConfig(object):
   def num_ps_tasks(self):
     return self._num_ps_tasks
 
-  @property
-  def ps_device(self):
-    return self._ps_device
-
-  @property
-  def worker_device(self):
-    return self._worker_device
-
   def caching_device(self):
     """Returns the device to use for caching variables.
 
@@ -592,8 +584,6 @@ class DeploymentConfig(object):
     if clone_index >= self._num_clones:
       raise ValueError('clone_index must be less than num_clones')
     device = ''
-    if self._num_ps_tasks > 0:
-      device += self._worker_device
     if self._clone_on_cpu:
       device += '/device:CPU:0'
     else:
@@ -626,10 +616,7 @@ class DeploymentConfig(object):
     Returns:
       A value suitable for `tf.device()`.
     """
-    if self._num_ps_tasks > 0 or self._num_clones > 0:
-      return self._worker_device + '/device:CPU:0'
-    else:
-      return ''
+    return '/device:CPU:0'
 
   def inputs_device(self):
     """Device to use to build the inputs.
@@ -637,11 +624,7 @@ class DeploymentConfig(object):
     Returns:
       A value suitable for `tf.device()`.
     """
-    device = ''
-    if self._num_ps_tasks > 0:
-      device += self._worker_device
-    device += '/device:CPU:0'
-    return device
+    return '/device:CPU:0'
 
   def variables_device(self):
     """Returns the device to use for variables created inside the clone.
@@ -649,33 +632,4 @@ class DeploymentConfig(object):
     Returns:
       A value suitable for `tf.device()`.
     """
-    device = ''
-    if self._num_ps_tasks > 0:
-      device += self._ps_device
-    device += '/device:CPU:0'
-
-    class _PSDeviceChooser(object):
-      """Slim device chooser for variables when using PS."""
-
-      def __init__(self, device, tasks):
-        self._device = device
-        self._tasks = tasks
-        self._task = 0
-
-      def choose(self, op):
-        if op.device:
-          return op.device
-        node_def = op if isinstance(op, tf.NodeDef) else op.node_def
-        if node_def.op == 'Variable':
-          t = self._task
-          self._task = (self._task + 1) % self._tasks
-          d = '%s/task:%d' % (self._device, t)
-          return d
-        else:
-          return op.device
-
-    if not self._num_ps_tasks:
-      return device
-    else:
-      chooser = _PSDeviceChooser(device, self._num_ps_tasks)
-      return chooser.choose
+    return '/device:CPU:0'
