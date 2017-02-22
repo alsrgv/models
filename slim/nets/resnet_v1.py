@@ -201,6 +201,8 @@ def resnet_v1(inputs,
         end_points = slim.utils.convert_collection_to_dict(end_points_collection)
         if num_classes is not None:
           end_points['predictions'] = slim.softmax(net, scope='predictions')
+        # Squeeze out extra dimensions
+        net = tf.squeeze(net)
         return net, end_points
 resnet_v1.default_image_size = 224
 
