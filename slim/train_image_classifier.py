@@ -546,8 +546,8 @@ def do_main(master='', device=None):
     with tf.device(deploy_config.optimizer_device()):
       learning_rate = _configure_learning_rate(dataset.num_samples, global_step)
       optimizer = _configure_optimizer(learning_rate)
-      summaries.add(tf.summary.scalar('learning_rate', learning_rate,
-                                      name='learning_rate'))
+      summaries.add(tf.summary.scalar('learning_rate', learning_rate))
+                                     
 
     if FLAGS.sync_replicas:
       # If sync_replicas is enabled, the averaging will be done in the chief
@@ -572,8 +572,8 @@ def do_main(master='', device=None):
         optimizer,
         var_list=variables_to_train)
     # Add total_loss to summary.
-    summaries.add(tf.summary.scalar('total_loss', total_loss,
-                                    name='total_loss'))
+    summaries.add(tf.summary.scalar('total_loss', total_loss))
+                         
 
     # Create gradient updates.
     grad_updates = optimizer.apply_gradients(clones_gradients,
