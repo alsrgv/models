@@ -21,6 +21,7 @@ from __future__ import print_function
 import tensorflow as tf
 
 from tensorflow.python.ops import control_flow_ops
+from tensorflow.python.ops import data_flow_ops
 from datasets import dataset_factory
 from deployment import model_deploy
 from nets import nets_factory
@@ -166,6 +167,10 @@ tf.app.flags.DEFINE_float(
     'moving_average_decay', None,
     'The decay to use for the moving average.'
     'If left as None, then moving averages are not used.')
+
+tf.app.flags.DEFINE_bool(
+    'use_staging', False,
+    'Whether to use GPU StagingArea.')
 
 #######################
 # Dataset Flags #
@@ -486,12 +491,27 @@ def do_main(master='', device=None):
       batch_queue = slim.prefetch_queue.prefetch_queue(
           [images, labels], capacity=2 * deploy_config.num_clones)
 
+    def staging(images, labels):
+        # This is hack, not sure how to use properly until there's tutorial from Google.
+        area = data_flow_ops.StagingArea([images.dtype, labels.dtype])
+        put_op = area.put([images, labels])
+
+        with tf.device('/cpu:0'):
+            dummy = tf.FIFOQueue(name='dummy', capacity=1, dtypes=[images.dtype, labels.dtype])
+        qr = tf.train.QueueRunner(queue=dummy, enqueue_ops=[put_op], close_op=tf.no_op(), cancel_op=tf.no_op())
+        tf.train.add_queue_runner(qr)
+
+        staged_images, staged_labels = area.get()
+        return tf.reshape(staged_images, images.shape), tf.reshape(staged_labels, labels.shape)
+
     ####################
     # Define the model #
     ####################
     def clone_fn(batch_queue):
       """Allows data parallelism by creating multiple clones of network_fn."""
       images, labels = batch_queue.dequeue()
+      if FLAGS.use_staging:
+        images, labels = staging(images, labels)
       logits, end_points = network_fn(images)
 
       #############################
