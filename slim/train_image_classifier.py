@@ -518,11 +518,11 @@ def do_main(master='', device=None):
       # Specify the loss function #
       #############################
       if 'AuxLogits' in end_points:
-        slim.losses.softmax_cross_entropy(
-            end_points['AuxLogits'], labels,
-            label_smoothing=FLAGS.label_smoothing, weight=0.4, scope='aux_loss')
-      slim.losses.softmax_cross_entropy(
-          logits, labels, label_smoothing=FLAGS.label_smoothing, weight=1.0)
+        tf.losses.softmax_cross_entropy(
+            logits=end_points['AuxLogits'], onehot_labels=labels,
+            label_smoothing=FLAGS.label_smoothing, weights=0.4, scope='aux_loss')
+      tf.losses.softmax_cross_entropy(
+          logits=logits, onehot_labels=labels, label_smoothing=FLAGS.label_smoothing, weights=1.0)
       return end_points
 
     # Gather initial summaries.
@@ -577,7 +577,7 @@ def do_main(master='', device=None):
           replicas_to_aggregate=FLAGS.replicas_to_aggregate,
           variable_averages=variable_averages,
           variables_to_average=moving_average_variables,
-          replica_id=tf.constant(FLAGS.task_id, tf.int32, shape=()),
+          #replica_id=tf.constant(FLAGS.task_id, tf.int32, shape=()),
           total_num_replicas=max(1, len(_parse_comma_list(FLAGS.worker_hosts))))
     elif FLAGS.moving_average_decay:
       # Update ops executed locally by trainer.
