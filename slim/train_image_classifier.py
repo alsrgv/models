@@ -222,6 +222,10 @@ tf.app.flags.DEFINE_boolean(
     'ignore_missing_vars', False,
     'When restoring a checkpoint would ignore missing variables.')
 
+tf.app.flags.DEFINE_boolean(
+    'restore_all_vars', False,
+    'Restore all global variables from a checkpoint.')
+
 FLAGS = tf.app.flags.FLAGS
 
 
@@ -343,7 +347,11 @@ def _get_init_fn():
 
   # TODO(sguada) variables.filter_variables()
   variables_to_restore = []
-  for var in slim.get_model_variables():
+  if FLAGS.restore_all_vars:
+    all_vars = slim.get_variables()
+  else:
+    all_vars = slim.get_model_variables()
+  for var in all_vars:
     excluded = False
     for exclusion in exclusions:
       if var.op.name.startswith(exclusion):
